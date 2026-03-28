@@ -248,115 +248,250 @@ public abstract class BinarySearchTreeBase<TKey, TValue, TNode>(IComparer<TKey>?
         new TreeIterator(Root, TraversalStrategy.PostOrderReverse);
     
     /// <summary>
-    /// Внутренний класс-итератор. 
-    /// Реализует паттерн Iterator вручную, без yield return (ban).
+    /// Внутренний класс-итератор.
+    /// Реализует паттерн Iterator вручную без yield return и без Stack —
+    /// перемещение осуществляется по указателям Parent/Left/Right от текущего узла.
     /// </summary>
-    private struct TreeIterator : 
+    private struct TreeIterator :
         IEnumerable<TreeEntry<TKey, TValue>>,
         IEnumerator<TreeEntry<TKey, TValue>>
     {
         private readonly TraversalStrategy _strategy;
         private readonly TNode? _root;
-        private Stack<(TNode node, bool visitNow, int depth)>? _stack;
         private TNode? _current;
-        private int _currentDepth;
+        private int _depth;
         private bool _started;
+        private bool _finished;
 
         internal TreeIterator(TNode? root, TraversalStrategy strategy)
         {
             _root = root;
             _strategy = strategy;
-            _stack = null;
             _current = null;
-            _currentDepth = 0;
+            _depth = 0;
             _started = false;
+            _finished = false;
         }
 
         public IEnumerator<TreeEntry<TKey, TValue>> GetEnumerator() => this;
         IEnumerator IEnumerable.GetEnumerator() => this;
-        
+
         public TreeEntry<TKey, TValue> Current
         {
             get
             {
                 if (_current == null) throw new InvalidOperationException();
-                return new TreeEntry<TKey, TValue>(_current.Key, _current.Value, _currentDepth);
+                return new TreeEntry<TKey, TValue>(_current.Key, _current.Value, _depth);
             }
         }
 
         object IEnumerator.Current => Current;
-        
+
         public bool MoveNext()
         {
+            if (_finished) return false;
+
             if (!_started)
             {
-                _stack = new Stack<(TNode, bool, int)>();
-                if (_root != null) _stack.Push((_root, false, 0));
                 _started = true;
-            }
-
-            while (_stack!.Count > 0)
-            {
-                var (node, visitNow, depth) = _stack.Pop();
+                if (_root == null) { _finished = true; return false; }
 
                 switch (_strategy)
                 {
                     case TraversalStrategy.InOrder:
-                        // Left → Root → Right
-                        if (visitNow) { _current = node; _currentDepth = depth; return true; }
-                        if (node.Right != null) _stack.Push((node.Right, false, depth + 1));
-                        _stack.Push((node, true, depth));
-                        if (node.Left != null) _stack.Push((node.Left, false, depth + 1));
+                        (_current, _depth) = GoLeftMost(_root, 0);
                         break;
-
-                    case TraversalStrategy.PreOrder:
-                        // Root → Left → Right (emit on first encounter)
-                        if (node.Right != null) _stack.Push((node.Right, false, depth + 1));
-                        if (node.Left != null) _stack.Push((node.Left, false, depth + 1));
-                        _current = node; _currentDepth = depth; return true;
-
-                    case TraversalStrategy.PostOrder:
-                        // Left → Right → Root
-                        if (visitNow) { _current = node; _currentDepth = depth; return true; }
-                        _stack.Push((node, true, depth));
-                        if (node.Right != null) _stack.Push((node.Right, false, depth + 1));
-                        if (node.Left != null) _stack.Push((node.Left, false, depth + 1));
-                        break;
-
                     case TraversalStrategy.InOrderReverse:
-                        // Right → Root → Left
-                        if (visitNow) { _current = node; _currentDepth = depth; return true; }
-                        if (node.Left != null) _stack.Push((node.Left, false, depth + 1));
-                        _stack.Push((node, true, depth));
-                        if (node.Right != null) _stack.Push((node.Right, false, depth + 1));
+                        (_current, _depth) = GoRightMost(_root, 0);
                         break;
-
+                    case TraversalStrategy.PreOrder:
+                        _current = _root; _depth = 0;
+                        break;
+                    case TraversalStrategy.PostOrder:
+                        (_current, _depth) = PostOrderFirst(_root, 0);
+                        break;
                     case TraversalStrategy.PreOrderReverse:
-                        // Emits: Right subtree → Left subtree → Root  (= reverse of Root→Left→Right)
-                        // Root is deferred (visitNow=true), right child is pushed under left so right is popped first
-                        if (visitNow) { _current = node; _currentDepth = depth; return true; }
-                        _stack.Push((node, true, depth));
-                        if (node.Left != null) _stack.Push((node.Left, false, depth + 1));
-                        if (node.Right != null) _stack.Push((node.Right, false, depth + 1));
+                        (_current, _depth) = PreOrderReverseFirst(_root, 0);
                         break;
-
                     case TraversalStrategy.PostOrderReverse:
-                        // Emits: Root → Right subtree → Left subtree  (= reverse of Left→Right→Root)
-                        // Left is pushed first (bottom), right on top so right is popped and visited first
-                        if (node.Left != null) _stack.Push((node.Left, false, depth + 1));
-                        if (node.Right != null) _stack.Push((node.Right, false, depth + 1));
-                        _current = node; _currentDepth = depth; return true;
+                        _current = _root; _depth = 0;
+                        break;
                 }
+                return true;
             }
-            return false;
+
+            TNode? next;
+            int nextDepth;
+
+            switch (_strategy)
+            {
+                case TraversalStrategy.InOrder:
+                    (next, nextDepth) = InOrderNext(_current!, _depth);
+                    break;
+                case TraversalStrategy.InOrderReverse:
+                    (next, nextDepth) = InOrderReverseNext(_current!, _depth);
+                    break;
+                case TraversalStrategy.PreOrder:
+                    (next, nextDepth) = PreOrderNext(_current!, _depth);
+                    break;
+                case TraversalStrategy.PostOrder:
+                    (next, nextDepth) = PostOrderNext(_current!, _depth);
+                    break;
+                case TraversalStrategy.PreOrderReverse:
+                    (next, nextDepth) = PreOrderReverseNext(_current!, _depth);
+                    break;
+                case TraversalStrategy.PostOrderReverse:
+                    (next, nextDepth) = PostOrderReverseNext(_current!, _depth);
+                    break;
+                default:
+                    next = null; nextDepth = 0;
+                    break;
+            }
+
+            if (next == null) { _finished = true; return false; }
+            _current = next;
+            _depth = nextDepth;
+            return true;
         }
-        
+
+        // ── helpers ─────────────────────────────────────────────────────────────
+
+        private static (TNode node, int depth) GoLeftMost(TNode node, int depth)
+        {
+            while (node.Left != null) { node = node.Left; depth++; }
+            return (node, depth);
+        }
+
+        private static (TNode node, int depth) GoRightMost(TNode node, int depth)
+        {
+            while (node.Right != null) { node = node.Right; depth++; }
+            return (node, depth);
+        }
+
+        // InOrder: Left → Root → Right
+        private static (TNode? node, int depth) InOrderNext(TNode current, int depth)
+        {
+            if (current.Right != null)
+                return GoLeftMost(current.Right, depth + 1);
+
+            while (current.Parent != null && current.IsRightChild)
+            {
+                current = current.Parent;
+                depth--;
+            }
+            if (current.Parent == null) return (null, 0);
+            return (current.Parent, depth - 1);
+        }
+
+        // InOrderReverse: Right → Root → Left
+        private static (TNode? node, int depth) InOrderReverseNext(TNode current, int depth)
+        {
+            if (current.Left != null)
+                return GoRightMost(current.Left, depth + 1);
+
+            while (current.Parent != null && current.IsLeftChild)
+            {
+                current = current.Parent;
+                depth--;
+            }
+            if (current.Parent == null) return (null, 0);
+            return (current.Parent, depth - 1);
+        }
+
+        // PreOrder: Root → Left → Right
+        private static (TNode? node, int depth) PreOrderNext(TNode current, int depth)
+        {
+            if (current.Left != null) return (current.Left, depth + 1);
+            if (current.Right != null) return (current.Right, depth + 1);
+
+            while (current.Parent != null)
+            {
+                TNode parent = current.Parent;
+                depth--;
+                if (current.IsLeftChild && parent.Right != null)
+                    return (parent.Right, depth + 1);
+                current = parent;
+            }
+            return (null, 0);
+        }
+
+        // PostOrder first: deepest node preferring Left then Right
+        private static (TNode node, int depth) PostOrderFirst(TNode node, int depth)
+        {
+            while (true)
+            {
+                if (node.Left != null) { node = node.Left; depth++; }
+                else if (node.Right != null) { node = node.Right; depth++; }
+                else break;
+            }
+            return (node, depth);
+        }
+
+        // PostOrder: Left → Right → Root
+        private static (TNode? node, int depth) PostOrderNext(TNode current, int depth)
+        {
+            if (current.Parent == null) return (null, 0);
+
+            TNode parent = current.Parent;
+            if (current.IsRightChild) return (parent, depth - 1);
+
+            // current is left child
+            if (parent.Right != null)
+                return PostOrderFirst(parent.Right, depth); // sibling is at same depth
+
+            return (parent, depth - 1);
+        }
+
+        // PreOrderReverse first: deepest node preferring Right then Left
+        private static (TNode node, int depth) PreOrderReverseFirst(TNode node, int depth)
+        {
+            while (true)
+            {
+                if (node.Right != null) { node = node.Right; depth++; }
+                else if (node.Left != null) { node = node.Left; depth++; }
+                else break;
+            }
+            return (node, depth);
+        }
+
+        // PreOrderReverse: Right subtree → Left subtree → Root
+        private static (TNode? node, int depth) PreOrderReverseNext(TNode current, int depth)
+        {
+            if (current.Parent == null) return (null, 0);
+
+            TNode parent = current.Parent;
+            if (current.IsLeftChild) return (parent, depth - 1);
+
+            // current is right child
+            if (parent.Left != null)
+                return PreOrderReverseFirst(parent.Left, depth); // sibling is at same depth
+
+            return (parent, depth - 1);
+        }
+
+        // PostOrderReverse: Root → Right → Left
+        private static (TNode? node, int depth) PostOrderReverseNext(TNode current, int depth)
+        {
+            if (current.Right != null) return (current.Right, depth + 1);
+            if (current.Left != null) return (current.Left, depth + 1);
+
+            while (current.Parent != null)
+            {
+                TNode parent = current.Parent;
+                depth--;
+                if (current.IsRightChild && parent.Left != null)
+                    return (parent.Left, depth + 1);
+                current = parent;
+            }
+            return (null, 0);
+        }
+
         public void Reset()
         {
-            _stack = null;
             _current = null;
-            _currentDepth = 0;
+            _depth = 0;
             _started = false;
+            _finished = false;
         }
 
         public void Dispose()
