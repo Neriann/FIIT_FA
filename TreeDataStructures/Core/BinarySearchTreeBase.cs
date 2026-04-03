@@ -96,7 +96,7 @@ public abstract class BinarySearchTreeBase<TKey, TValue, TNode>(IComparer<TKey>?
         return node;
     }
 
-    private static TNode GetMaximumElement(TNode node, ref int depth)
+    protected static TNode GetMaximumElement(TNode node, ref int depth)
     {
         while (node.Right != null)
         {
@@ -107,20 +107,47 @@ public abstract class BinarySearchTreeBase<TKey, TValue, TNode>(IComparer<TKey>?
         return node;
     }
 
+    private static TNode GetFarthestLeafAtLeft(TNode node, ref int depth)
+    {
+        while (node.Left != null || node.Right != null)
+        {
+            node = node.Left ?? node.Right!;
+            
+            ++depth;
+        }
+
+        return node;
+    }
+    
+    private static TNode GetFarthestLeafAtRight(TNode node, ref int depth)
+    {
+        while (node.Right != null || node.Left != null)
+        {
+            node = node.Right ?? node.Left!;
+            
+            ++depth;
+        }
+
+        return node;
+    }
+
     protected virtual void RemoveNode(TNode node)
     {
+        TNode? successor;
         if (node.Left == null)
         {
-            Transplant(node, node.Right);
+            successor = node.Right;
+            Transplant(node, successor);
         }
         else if (node.Right == null)
         {
-            Transplant(node, node.Left);
+            successor = node.Left;
+            Transplant(node, successor);
         }
         else
         {
-            int depth = 0;
-            TNode successor = GetMinimumElement(node.Right, ref depth);
+            int _ = 0;
+            successor = GetMinimumElement(node.Right, ref _);
             if (successor.Parent != node)
             {
                 Transplant(successor, successor.Right);
@@ -128,22 +155,19 @@ public abstract class BinarySearchTreeBase<TKey, TValue, TNode>(IComparer<TKey>?
 
                 successor.Right = node.Right;
                 successor.Right.Parent = successor;
-
-                successor.Left = node.Left;
-                successor.Left.Parent = successor;
             }
             else
             {
                 Transplant(node, successor);
-
-                successor.Left = node.Left;
-                successor.Left.Parent = successor;
             }
+
+            successor.Left = node.Left;
+            successor.Left.Parent = successor;
 
             if (node == Root) Root = successor;
         }
 
-        OnNodeRemoved(node.Parent, node);
+        OnNodeRemoved(successor?.Parent, successor);
     }
 
     public virtual bool ContainsKey(TKey key) => FindNode(key) != null;
@@ -383,9 +407,11 @@ public abstract class BinarySearchTreeBase<TKey, TValue, TNode>(IComparer<TKey>?
 
             return _strategy switch
             {
-                TraversalStrategy.InOrder or TraversalStrategy.PostOrder => GetMinimumElement(_root, ref _depth),
-                TraversalStrategy.InOrderReverse or TraversalStrategy.PreOrderReverse => GetMaximumElement(_root,
+                TraversalStrategy.InOrder => GetMinimumElement(_root, ref _depth),
+                TraversalStrategy.PostOrder => GetFarthestLeafAtLeft(_root, ref _depth),
+                TraversalStrategy.InOrderReverse => GetMaximumElement(_root,
                     ref _depth),
+                TraversalStrategy.PreOrderReverse => GetFarthestLeafAtRight(_root, ref _depth),
                 _ => _root
             };
         }
@@ -400,6 +426,7 @@ public abstract class BinarySearchTreeBase<TKey, TValue, TNode>(IComparer<TKey>?
                     if (_curr.Right != null)
                     {
                         _curr = GetMinimumElement(_curr.Right, ref _depth);
+                        ++_depth;
                         break;
                     }
 
@@ -410,7 +437,7 @@ public abstract class BinarySearchTreeBase<TKey, TValue, TNode>(IComparer<TKey>?
                     }
 
                     _curr = _curr.Parent;
-                    --_depth;
+                    if (_curr != null) --_depth;
                     break;
 
                 case TraversalStrategy.PreOrder:
@@ -447,13 +474,14 @@ public abstract class BinarySearchTreeBase<TKey, TValue, TNode>(IComparer<TKey>?
                     }
 
                     _curr = _curr.Parent;
-                    --_depth;
+                    if (_curr != null) --_depth;
                     break;
 
                 case TraversalStrategy.InOrderReverse:
                     if (_curr.Left != null)
                     {
                         _curr = GetMaximumElement(_curr.Left, ref _depth);
+                        ++_depth;
                         break;
                     }
 
@@ -464,7 +492,7 @@ public abstract class BinarySearchTreeBase<TKey, TValue, TNode>(IComparer<TKey>?
                     }
 
                     _curr = _curr.Parent;
-                    --_depth;
+                    if (_curr != null) --_depth;
                     break;
 
                 case TraversalStrategy.PreOrderReverse:
@@ -477,7 +505,7 @@ public abstract class BinarySearchTreeBase<TKey, TValue, TNode>(IComparer<TKey>?
                     }
 
                     _curr = _curr.Parent;
-                    --_depth;
+                    if (_curr != null) --_depth;
                     break;
 
                 case TraversalStrategy.PostOrderReverse:
@@ -538,7 +566,7 @@ public abstract class BinarySearchTreeBase<TKey, TValue, TNode>(IComparer<TKey>?
         Count = 0;
     }
 
-    public bool Contains(KeyValuePair<TKey, TValue> item) => ContainsKey(item.Key);
+    public bool Contains(KeyValuePair<TKey, TValue> item) => TryGetValue(item.Key, out TValue? value) && EqualityComparer<TValue>.Default.Equals(value, item.Value);
 
     public void CopyTo(KeyValuePair<TKey, TValue>[] array, int arrayIndex)
     {
@@ -560,5 +588,15 @@ public abstract class BinarySearchTreeBase<TKey, TValue, TNode>(IComparer<TKey>?
         }
     }
 
-    public bool Remove(KeyValuePair<TKey, TValue> item) => Remove(item.Key);
+    public bool Remove(KeyValuePair<TKey, TValue> item)
+    {
+        TNode? node = FindNode(item.Key);
+        if (node == null) return false;
+
+        if (!EqualityComparer<TValue>.Default.Equals(node.Value, item.Value)) return false;
+        
+        RemoveNode(node);
+        --Count;
+        return true;
+    }
 }
