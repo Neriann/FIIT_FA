@@ -85,7 +85,7 @@ public abstract class BinarySearchTreeBase<TKey, TValue, TNode>(IComparer<TKey>?
     }
 
 
-    private static TNode GetMinimumElement(TNode node, ref int depth)
+    protected static TNode GetMinimumElement(TNode node, ref int depth)
     {
         while (node.Left != null)
         {
@@ -133,41 +133,21 @@ public abstract class BinarySearchTreeBase<TKey, TValue, TNode>(IComparer<TKey>?
 
     protected virtual void RemoveNode(TNode node)
     {
-        TNode? successor;
-        if (node.Left == null)
+        if (node is { Left: not null, Right: not null })
         {
-            successor = node.Right;
-            Transplant(node, successor);
+            // Swap with successor
+            int depth = 0;
+            TNode successor = GetMinimumElement(node.Right, ref depth);
+            node.Key = successor.Key;
+            node.Value = successor.Value;
+            RemoveNode(successor);
+            return;
         }
-        else if (node.Right == null)
-        {
-            successor = node.Left;
-            Transplant(node, successor);
-        }
-        else
-        {
-            int _ = 0;
-            successor = GetMinimumElement(node.Right, ref _);
-            if (successor.Parent != node)
-            {
-                Transplant(successor, successor.Right);
-                Transplant(node, successor);
-
-                successor.Right = node.Right;
-                successor.Right.Parent = successor;
-            }
-            else
-            {
-                Transplant(node, successor);
-            }
-
-            successor.Left = node.Left;
-            successor.Left.Parent = successor;
-
-            if (node == Root) Root = successor;
-        }
-
-        OnNodeRemoved(successor?.Parent, successor);
+        
+        TNode? child = node.Left ?? node.Right;
+        Transplant(node, child);
+        
+        OnNodeRemoved(node.Parent, child);
     }
 
     public virtual bool ContainsKey(TKey key) => FindNode(key) != null;
@@ -342,7 +322,6 @@ public abstract class BinarySearchTreeBase<TKey, TValue, TNode>(IComparer<TKey>?
         new TreeIterator(node, TraversalStrategy.PreOrderReverse);
 
     public IEnumerable<TreeEntry<TKey, TValue>> PostOrderReverse() => PostOrderReverseTraversal(Root);
-
     private IEnumerable<TreeEntry<TKey, TValue>> PostOrderReverseTraversal(TNode? node) =>
         new TreeIterator(node, TraversalStrategy.PostOrderReverse);
 
